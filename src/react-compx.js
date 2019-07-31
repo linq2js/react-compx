@@ -12,6 +12,9 @@ import {
 let currentState = {};
 let scopes = 0;
 let stateChanged = false;
+const hookTypes = {
+  fetcher: 1
+};
 const defaultSelector = state => state;
 const subscriptions = new Set();
 
@@ -33,7 +36,7 @@ function main(comp) {
     try {
       return memoizedComp(props, context);
     } catch (ex) {
-      if (ex instanceof AsyncError && ex.type === "fetcher") {
+      if (ex instanceof AsyncError && ex.type === hookTypes.fetcher) {
         ex.target.subscribe(() => forceRerender({}));
         return context.__renderFallback() || null;
       }
@@ -136,59 +139,84 @@ class Context {
 
   fallback = fallback => (this.__fallback = fallback);
 
-  async = (fetcher, ...args) => {
-    const hook = this.__getHook("async", () => ({
-      subscribe(subscription) {
-        this.subscription = subscription;
+  async = Object.assign(
+    (fetcher, ...args) => {
+      const hook = this.__getHook(hookTypes.fetcher, () => ({
+        subscribe(subscription) {
+          this.subscription = subscription;
+        }
+      }));
+
+      if (
+        hook.fetcher !== fetcher ||
+        hook.args.some((value, index) => value !== args[index])
+      ) {
+        hook.token = {};
+        hook.fetcher = fetcher;
+        hook.args = args;
+        hook.done = false;
+        hook.loading = false;
+        delete hook.payload;
+        delete hook.error;
       }
-    }));
 
-    if (
-      hook.fetcher !== fetcher ||
-      hook.args.some((value, index) => value !== args[index])
-    ) {
-      hook.token = {};
-      hook.fetcher = fetcher;
-      hook.args = args;
-      hook.done = false;
-      hook.loading = false;
-      delete hook.payload;
-      delete hook.error;
-    }
+      if (!hook.done) {
+        if (!hook.loading) {
+          hook.loading = true;
+          const token = hook.token;
+          fetcher(...hook.args).then(
+            payload => {
+              if (token !== hook.token || this.__isUnmount) return;
+              hook.payload = payload;
+              this.__asyncHookDone(hook);
+              return payload;
+            },
+            error => {
+              if (token !== hook.token || this.__isUnmount) return;
+              hook.error = error;
+              this.__asyncHookDone(hook);
+            }
+          );
+        }
+        throw new AsyncError(hook, hookTypes.fetcher);
+      }
 
-    if (!hook.done) {
-      if (!hook.loading) {
-        hook.loading = true;
-        const token = hook.token;
-        fetcher(...hook.args).then(
-          payload => {
-            if (token !== hook.token || this.__isUnmount) return;
-            hook.payload = payload;
-            this.__asyncHookDone(hook);
-            return payload;
-          },
-          error => {
-            if (token !== hook.token || this.__isUnmount) return;
-            hook.error = error;
-            this.__asyncHookDone(hook);
+      if (hook.error) {
+        throw hook.error;
+      }
+
+      return hook.payload;
+    },
+    {
+      all: (...fetchers) => {
+        const result = [];
+        let lastError;
+        try {
+          for (const fetcher of fetchers) {
+            result.push(this.async(...fetcher));
           }
-        );
+        } catch (ex) {
+          if (ex instanceof AsyncError && ex.type === hookTypes.fetcher) {
+            lastError = ex;
+          } else {
+            throw ex;
+          }
+        }
+
+        if (lastError) {
+          throw lastError;
+        }
+
+        return result;
       }
-      throw new AsyncError(hook, "fetcher");
     }
-
-    if (hook.error) {
-      throw hook.error;
-    }
-
-    return hook.payload;
-  };
+  );
 
   __asyncHookDone(hook) {
     hook.done = true;
     hook.loading = false;
     const everythingDone = this.__hooks
-      .filter(x => x.type === "async")
+      .filter(x => x.type === hookTypes.fetcher)
       .every(x => x.done);
     if (!everythingDone) return;
     hook.subscription && hook.subscription();
