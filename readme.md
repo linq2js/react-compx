@@ -197,3 +197,63 @@ No async.race supported because all loaders must be fulfilled before rendering s
 
 Because async() and async.all() are hooks so react hook rules apply for them as well.
 [Please refer this link for further info](https://reactjs.org/docs/hooks-rules.html)
+
+## Lazy load components
+
+```jsx harmony
+import React from "react";
+import compx from "react-compx";
+
+const [Comp1, Comp2] = compx.lazy(
+  () => import("./Comp1"),
+  () => import("./Comp2")
+);
+
+// lazy with fallback
+const [Comp3] = compx.lazy(<LoadingIndicator />, () => import("./Comp3"));
+```
+
+## Getting current state of store
+
+```jsx harmony
+import compx from "react-compx";
+
+console.log(compx.getState());
+```
+
+## Dispatching action outside component
+
+```jsx harmony
+import compx from "react-compx";
+
+const Login = (username, password) => console.log(username, password);
+
+compx.dispatch(Login, "test", "test");
+```
+
+## Extending rendering context
+
+```jsx harmony
+import React from "react";
+import compx from "react-compx";
+import { useState, useCallback } from "react";
+
+compx.extend({
+  useHandleChange(defaultValue) {
+    const [value, setValue] = useState(defaultValue);
+    const handleChange = useCallback(e => setValue(e.target.value), [setValue]);
+
+    return [value, handleChange];
+  }
+});
+
+const Greeting = compx((props, { useHandleChange }) => {
+  const [value, handleChange] = useHandleChange();
+  return (
+    <>
+      <input value={value} onChange={handleChange} />
+      <h1>Hi, {value} !</h1>
+    </>
+  );
+});
+```
