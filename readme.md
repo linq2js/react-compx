@@ -141,7 +141,7 @@ const LoadProduct = ({ productFilter }, page, size) => {
 compx.dispatch(LoadProduct, 0, 10);
 ```
 
-## Using async data loader inside component
+## Using async loader inside component
 
 ```jsx harmony
 import React from "react";
@@ -176,3 +176,24 @@ const App = compx((props, { async, fallback }) => {
 
 render(<App />, document.getElementById("root"));
 ```
+
+By default, async() function processes loaders one by one,
+call async.all(\[...loaders]) if you want to call multiple loaders at once
+
+```jsx harmony
+const App = compx((props, { async }) => {
+  const [result1, result2] = async.all(
+    [Loader1, loader1Param1, loader1Param2],
+    [Loader2, loader2Param1, loader2Param2]
+  );
+
+  console.log(result1, result2);
+});
+```
+
+No async.race supported because all loaders must be fulfilled before rendering start
+
+### Rules of async loader
+
+Because async() and async.all() are hooks so react hook rules apply for them as well.
+[Please refer this link for further info](https://reactjs.org/docs/hooks-rules.html)
