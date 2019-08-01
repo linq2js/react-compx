@@ -177,8 +177,8 @@ const App = compx((props, { async, fallback }) => {
 render(<App />, document.getElementById("root"));
 ```
 
-By default, async() function processes loaders one by one,
-call async.all(\[...loaders]) if you want to call multiple loaders at once
+By default, **async()** function processes loaders one by one,
+call **async.all(\[...loaders])** if you want to call multiple loaders at once
 
 ```jsx harmony
 const App = compx((props, { async }) => {
@@ -195,7 +195,7 @@ No async.race supported because all loaders must be fulfilled before rendering s
 
 ### Rules of async loader
 
-Because async() and async.all() are hooks so react hook rules apply for them as well.
+Because **async()** and **async.all()** are hooks so react hook rules apply for them as well.
 [Please refer this link for further info](https://reactjs.org/docs/hooks-rules.html)
 
 ## Lazy load components
@@ -256,4 +256,55 @@ const Greeting = compx((props, { useHandleChange }) => {
     </>
   );
 });
+```
+
+## Computed state prop
+
+```jsx harmony
+import compx from "react-compx";
+
+compx
+  .init({ a: 1, b: 2 })
+  // specific sum prop as computed prop
+  .computed({ sum: ({ a, b }) => a + b });
+console.log(compx.getState().sum); // 3
+```
+
+## Bindable state prop
+
+```jsx harmony
+import React from "react";
+import { render } from "react-dom";
+import compx from "react-compx";
+
+compx
+  .init({
+    count: 100
+  })
+  // specific count as bindable prop
+  .bind({
+    count: true
+  });
+
+const Increase = state => ({ count: state.count + 1 });
+
+const App = compx(
+  (
+    props,
+    {
+      // extract count value from store, must use $ prefix for bindable state prop
+      $count,
+      dispatch
+    }
+  ) => {
+    return (
+      <>
+        <h1>{$count}</h1>
+        <button onClick={() => dispatch(Increase)}>Increase</button>
+      </>
+    );
+  }
+);
+
+render(<App />, document.getElementById("root"));
 ```

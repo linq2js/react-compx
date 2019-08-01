@@ -12,6 +12,7 @@ import {
 let currentState = {};
 let scopes = 0;
 let stateChanged = false;
+let computedProps = {};
 const hookTypes = {
   fetcher: 1
 };
@@ -291,11 +292,8 @@ function init(state) {
     }
     nextState[key] = state[key];
   });
-
-  if (nextState !== currentState) {
-    currentState = nextState;
-    notify();
-  }
+  setState(nextState);
+  return main;
 }
 
 function notify() {
@@ -306,11 +304,16 @@ function notify() {
 
 function extend(...prototypes) {
   Object.assign(Context.prototype, ...prototypes);
+  return main;
 }
 
 function dispatch(action, ...args) {
   if (action.__resolvedAction) {
     return dispatch(action.__resolvedAction, ...args);
+  }
+
+  if (Array.isArray(action)) {
+    return dispatchReducer(action, args);
   }
 
   if (action.then) {
@@ -335,7 +338,11 @@ function dispatch(action, ...args) {
     }
     // reducer
     if (result && currentState !== result) {
-      if (result && result.$merge === true) {
+      if (result.$async === true) {
+        return dispatchAsync(result);
+      }
+      // process merging
+      if (result.$merge === true) {
         const { $merge, ...otherValues } = result;
         let nextState = currentState;
         Object.keys(otherValues).forEach(key => {
@@ -357,11 +364,120 @@ function dispatch(action, ...args) {
     scopes--;
     if (!scopes) {
       if (stateChanged) {
+        currentState = recompute(currentState);
         stateChanged = false;
         notify();
       }
     }
   }
+}
+
+function dispatchReducer(action, appendArgs) {
+  const [prop, ...prependArgs] = action;
+  const multipleProps = typeof prop !== "string";
+  const entries = multipleProps
+    ? Object.entries(prop)
+    : [[prop, prependArgs.shift()]];
+  const args = [...prependArgs, ...appendArgs];
+
+  return dispatch(state => {
+    const result = {
+      $merge: true
+    };
+    entries.forEach(([key, factory]) => {
+      const value = factory(state, ...args);
+      if (value && value.then) {
+        result.$async = true;
+      }
+      result[key] = value;
+    });
+    return result;
+  });
+}
+
+function recompute() {
+  let nextState = currentState;
+  Object.entries(computedProps).forEach(([key, computer]) => {
+    const nextValue = computer(nextState);
+    if (nextValue !== nextState[key]) {
+      if (nextState === currentState) {
+        nextState = { ...currentState };
+      }
+      nextState[key] = nextValue;
+    }
+  });
+  return nextState;
+}
+
+function computed(...args) {
+  if (args.length > 1) {
+    return computed({
+      [args[0]]: args[1]
+    });
+  }
+  Object.assign(computedProps, args[0]);
+  setState(recompute());
+
+  return main;
+}
+
+function setState(nextState) {
+  if (nextState !== currentState) {
+    currentState = nextState;
+    notify();
+  }
+
+  return main;
+}
+
+function createBindings(selectors) {
+  Object.entries(selectors).forEach(([key, selector]) => {
+    if (selector === true) {
+      selector = state => state[key];
+    } else if (typeof selector !== "function") {
+      const prop = selector;
+      selector = state => state[prop];
+    }
+    delete Context.prototype["$" + key];
+    Object.defineProperty(Context.prototype, "$" + key, {
+      configurable: true,
+      get() {
+        const value = selector(currentState);
+        this.__prevValues.push(value);
+        this.__selectors.push(selector);
+        return value;
+      }
+    });
+  });
+
+  return main;
+}
+
+async function dispatchAsync({ $async, $merge, $failure, ...props }) {
+  const entries = Object.entries(props);
+  const promises = entries.map(async ([key, promise]) => {
+    try {
+      const payload = await promise;
+      dispatch(() => ({
+        $merge: true,
+        [key]: payload
+      }));
+    } catch (e) {
+      $failure && dispatch($failure, e);
+    }
+  });
+
+  return Promise.all(promises);
+}
+
+function cleanup(...args) {
+  currentState = {};
+  subscriptions.clear();
+  if (args[0]) {
+    computedProps = {};
+  }
+
+  return main;
 }
 
 Object.assign(main, {
@@ -370,7 +486,10 @@ Object.assign(main, {
   getState,
   subscribe,
   lazy: createLazy,
-  extend
+  extend,
+  cleanup,
+  computed,
+  bind: createBindings
 });
 
 export default main;
