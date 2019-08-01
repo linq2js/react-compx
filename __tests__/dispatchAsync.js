@@ -7,7 +7,6 @@ afterEach(compx.cleanup);
 
 test("Should update state async", async () => {
   const LoadData = () => ({
-    $async: true,
     prop1: callApi(1, 100),
     prop2: callApi(2, 200)
   });

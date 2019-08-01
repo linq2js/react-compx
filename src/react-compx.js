@@ -298,7 +298,7 @@ function init(state) {
 
 function notify() {
   for (const subscription of subscriptions) {
-    subscription();
+    subscription(currentState);
   }
 }
 
@@ -323,12 +323,15 @@ function dispatch(action, ...args) {
   }
   scopes++;
   try {
-    const result = action(currentState, ...args);
+    let result = action(currentState, ...args);
 
     if (typeof result === "function") {
       return result(dispatch, getState);
-    } else if (result && result.then) {
+    }
+    // process async result
+    else if (result && result.then) {
       return result.then(payload => {
+        // async result can be action
         if (payload && typeof payload.default === "function") {
           action.__resolvedAction = payload.default;
           return dispatch(payload.default, ...args);
@@ -336,30 +339,36 @@ function dispatch(action, ...args) {
         return payload;
       });
     }
-    // reducer
-    if (result && currentState !== result) {
-      if (result.$async === true) {
-        return dispatchAsync(result);
+    // check is there any async prop
+    const asyncProps = [];
+    const normalProps = [];
+    Object.entries(result).forEach(([key, value]) =>
+      key === "$failure" || (value && value.then)
+        ? asyncProps.push([key, value])
+        : normalProps.push([key, value])
+    );
+
+    if (asyncProps.length) {
+      if (normalProps.length) {
+        const reducedNormalProps = normalProps.reduce((props, [key, value]) => {
+          props[key] = value;
+          return props;
+        }, {});
+
+        setState(reducedNormalProps);
       }
-      // process merging
-      if (result.$merge === true) {
-        const { $merge, ...otherValues } = result;
-        let nextState = currentState;
-        Object.keys(otherValues).forEach(key => {
-          if (result[key] !== nextState[key]) {
-            if (nextState === currentState) {
-              nextState = { ...currentState };
-            }
-            nextState[key] = result[key];
-            stateChanged = true;
-          }
-        });
-        currentState = nextState;
-      } else {
-        stateChanged = true;
-        currentState = result;
-      }
+
+      const reducedAsyncProps = asyncProps.reduce((props, [key, value]) => {
+        props[key] = value;
+        return props;
+      }, {});
+
+      return dispatchAsync(reducedAsyncProps);
     }
+
+    setState(result);
+
+    // reducer
   } finally {
     scopes--;
     if (!scopes) {
@@ -381,17 +390,15 @@ function dispatchReducer(action, appendArgs) {
   const args = [...prependArgs, ...appendArgs];
 
   return dispatch(state => {
-    const result = {
-      $merge: true
-    };
-    entries.forEach(([key, factory]) => {
-      const value = factory(state, ...args);
-      if (value && value.then) {
-        result.$async = true;
+    return entries.reduce(
+      (result, [key, factory]) => {
+        result[key] = factory(state, ...args);
+        return result;
+      },
+      {
+        $merge: true
       }
-      result[key] = value;
-    });
-    return result;
+    );
   });
 }
 
@@ -422,9 +429,32 @@ function computed(...args) {
 }
 
 function setState(nextState) {
-  if (nextState !== currentState) {
-    currentState = nextState;
-    notify();
+  if (nextState && currentState !== nextState) {
+    // process merging
+    if (nextState.$merge === true) {
+      const { $merge, ...otherValues } = nextState;
+      const prevState = currentState;
+      Object.keys(otherValues).forEach(key => {
+        const currentValue = otherValues[key];
+        if (currentState[key] !== currentValue) {
+          if (currentState === prevState) {
+            currentState = { ...currentState };
+          }
+          currentState[key] = currentValue;
+          stateChanged = true;
+        }
+      });
+    } else {
+      stateChanged = true;
+      currentState = nextState;
+    }
+  }
+
+  if (stateChanged) {
+    if (!scopes) {
+      stateChanged = false;
+      notify();
+    }
   }
 
   return main;
@@ -453,7 +483,7 @@ function createBindings(selectors) {
   return main;
 }
 
-async function dispatchAsync({ $async, $merge, $failure, ...props }) {
+async function dispatchAsync({ $failure, ...props }) {
   const entries = Object.entries(props);
   const promises = entries.map(async ([key, promise]) => {
     try {

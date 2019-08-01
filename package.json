@@ -1,6 +1,6 @@
 {
   "name": "react-compx",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Make your app logic simpler",
   "main": "src/react-compx.js",
   "types": "src/react-compx.d.ts",
